@@ -11,19 +11,28 @@ từng luồng, khớp với backend_frontend_integration_doc.md:
 """
 
 
-def build_anchored_success_prompt(slide_context: str, page_id: str, question: str) -> str:
+from security import wrap_untrusted
+
+def build_anchored_success_prompt(slide_context: str, page_id: str, question: str, highlighted_text: str, unverified_highlight: bool) -> str:
     """
     NHÁNH A - Tìm thấy exact match đoạn bôi đen trong slide DB.
     Bắt buộc trích dẫn trang slide, được phép tìm Google cho nguồn đọc thêm.
     """
+    confidence_note = (
+        ""
+        if not unverified_highlight
+        else "\n(Lưu ý: không xác minh được đoạn bôi đen khớp chính xác trong trang này, trả lời thận trọng và có thể nhắc học viên xác nhận lại nếu cần.)"
+    )
     return f"""[NGỮ CẢNH SLIDE — Trang {page_id}]
-{slide_context}
+{wrap_untrusted(slide_context)}
 
 [BỐI CẢNH]
 Học viên đang xem trang slide {page_id} và bôi đen một đoạn để hỏi.
+Đoạn bôi đen:
+{wrap_untrusted(highlighted_text)}
 
 [CÂU HỎI CỦA HỌC VIÊN]
-{question}
+{wrap_untrusted(question)}{confidence_note}
 
 [NHIỆM VỤ]
 1. Trả lời câu hỏi bám sát nội dung slide trang {page_id} ở trên. Đây là nguồn chính.
@@ -43,7 +52,7 @@ Học viên bôi đen một đoạn trên slide rồi đặt câu hỏi, nhưng 
 nằm ngoài phạm vi tài liệu hiện có).
 
 [CÂU HỎI CỦA HỌC VIÊN]
-{question}
+{wrap_untrusted(question)}
 
 [NHIỆM VỤ]
 1. KHÔNG suy đoán về nội dung đoạn bôi đen mà bạn không nhìn thấy.
@@ -58,7 +67,7 @@ def build_unanchored_rag_prompt(question: str, lecture_context: str, slide_page:
     NHÁNH B - Chat tự do. RAG từ transcript + slide mapping.
     Được phép Google Search khi lời giảng không đủ.
     """
-    context_block = lecture_context.strip() if lecture_context and lecture_context.strip() else "(Không truy xuất được đoạn lời giảng liên quan.)"
+    context_block = wrap_untrusted(lecture_context) if lecture_context and lecture_context.strip() else "(Không truy xuất được đoạn lời giảng liên quan.)"
 
     return f"""[NGỮ CẢNH TỪ LỜI GIẢNG] (top đoạn transcript liên quan nhất — nguồn kiến thức chính để trả lời)
 {context_block}
@@ -67,7 +76,7 @@ def build_unanchored_rag_prompt(question: str, lecture_context: str, slide_page:
 Trang slide liên quan nhất tới câu hỏi: {slide_page}
 
 [CÂU HỎI CỦA HỌC VIÊN]
-{question}
+{wrap_untrusted(question)}
 
 [NHIỆM VỤ]
 0. KIỂM TRA PHẠM VI TRƯỚC TIÊN: Xác định câu hỏi có thuộc nội dung khoá học không (AI & LLM, xác định/thiết kế bài toán cho AI, và các khái niệm trong slide/lời giảng). Nếu KHÔNG thuộc phạm vi (nấu ăn, thời tiết, tin tức, code hộ ngoài bài, chuyện phiếm, v.v.), hãy TỪ CHỐI lịch sự trong <answer>, mời học viên quay lại nội dung khoá học, KHÔNG dùng Google Search, KHÔNG tạo thẻ <citation>. Bỏ qua các bước dưới.

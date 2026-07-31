@@ -3,6 +3,7 @@ import { useAppContext } from "../context/AppContext";
 import { assets } from "../assets/assets";
 import Message from "./Message";
 import toast from "react-hot-toast";
+import { PdfViewer } from "./PdfViewer";
 
 const ChatBox = () => {
 
@@ -14,7 +15,12 @@ const ChatBox = () => {
     theme,
     axios,
     token,
-    updateChatMessages
+    updateChatMessages,
+    currentDocId,
+    highlightedText,
+    highlightedPage,
+    setHighlightedText,
+    setHighlightedPage
   } = useAppContext();
 
   const [messages, setMessages] = useState([]);
@@ -67,34 +73,50 @@ const ChatBox = () => {
         userMessage
       );
 
+      // Call new Backend `/chat` API
       const { data } = await axios.post(
-        '/api/message/text',
+        'http://127.0.0.1:8000/chat',
         {
-          chatId: selectedChat._id,
-          prompt: promptCopy
-        },
-        {
-          headers: {
-            Authorization: token
-          }
+          message: promptCopy,
+          doc_id: currentDocId,
+          highlighted_text: highlightedText || null,
+          highlighted_page: highlightedPage || null
         }
       );
 
-      if (data.success) {
+      // Clear highlight state after sending
+      setHighlightedText(null);
+      setHighlightedPage(null);
+
+      // data contains: { mode, answer, citations, security_flag, unverified_highlight, ... }
+      if (data) {
+        
+        // Wrap response into a Message-compatible object
+        const botMessage = {
+          role: 'model',
+          content: data.answer || data.llm_response?.answer || '',
+          timestamp: Date.now(),
+          mode: data.mode,
+          citations: data.citations || [],
+          security_flag: data.security_flag,
+          unverified_highlight: data.unverified_highlight
+        };
 
         setMessages(prev => [
           ...prev,
-          data.reply
+          botMessage
         ]);
 
-        updateChatMessages(
-          selectedChat._id,
-          data.reply
-        );
+        if (selectedChat) {
+          updateChatMessages(
+            selectedChat._id,
+            botMessage
+          );
+        }
 
       } else {
 
-        toast.error(data.message);
+        toast.error("Không nhận được phản hồi từ server");
 
       }
 
@@ -139,8 +161,15 @@ const ChatBox = () => {
   }, [messages]);
 
   return (
-    <div className='flex-1 flex flex-col justify-between m-5 md:m-10 xl:mx-30
-    max-md:mt-14 2xl:pr-40'>
+    <div className='flex w-full h-full'>
+      
+      {/* Left side: PDF Viewer */}
+      <div className="hidden md:flex w-1/2 p-4 border-r border-gray-200 dark:border-gray-700 h-full">
+        <PdfViewer />
+      </div>
+
+      {/* Right side: Chat */}
+      <div className='flex-1 flex flex-col justify-between m-5 md:m-10 xl:mx-10 max-md:mt-14 h-[calc(100vh-80px)]'>
 
       {/* Chat Messages */}
       <div
@@ -194,6 +223,21 @@ const ChatBox = () => {
 
       </div>
 
+      {/* Highlight Indicator */}
+      {highlightedText && (
+        <div className="bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 p-2 mb-2 rounded-md text-sm shadow-md relative">
+          <span className="font-bold">Đang trích dẫn (Trang {highlightedPage || "?"}): </span>
+          <span className="italic">"{highlightedText.substring(0, 50)}{highlightedText.length > 50 ? '...' : ''}"</span>
+          <button 
+            type="button"
+            className="absolute top-1 right-2 text-yellow-600 dark:text-yellow-400 font-bold" 
+            onClick={() => { setHighlightedText(null); setHighlightedPage(null); }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Prompt Input */}
       <form
         className='bg-primary/20 dark:bg-[#583C79]/30 border border-primary
@@ -230,6 +274,7 @@ const ChatBox = () => {
         </button>
 
       </form>
+      </div>
     </div>
   );
 

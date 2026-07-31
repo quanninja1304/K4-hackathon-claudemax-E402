@@ -118,10 +118,9 @@ except Exception as e:
 # --- 2. MODELS ---
 class ChatRequest(BaseModel):
     message: str
-    # Tên file tài liệu học viên đang xem trên UI, ví dụ "d1-slide-hackathon.pdf".
-    # Đây là field BẮT BUỘC về mặt logic để Fast Path build đúng key -- không được
-    # suy luận / hardcode filename từ phía backend nữa, vì DB giờ có nhiều tài liệu.
     doc_id: Optional[str] = None
+    highlighted_text: Optional[str] = None
+    highlighted_page: Optional[int] = None
 
 
 # --- 3. HELPERS ---
@@ -185,15 +184,11 @@ def page_num_from_key(page_id: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-def exact_match_lookup(highlighted_text: str, doc_prefix: Optional[str], near_idx: Optional[int]):
-    """Tìm TẤT CẢ trang chứa đoạn bôi đen (đã strip boilerplate), giới hạn đúng
-    tài liệu đang xem (doc_prefix). Nếu có nhiều trang cùng match, ưu tiên trang
-    có idx GẦN near_idx nhất (thường là reported_page đã convert sang idx),
-    thay vì luôn lấy kết quả đầu tiên theo thứ tự dict như code cũ.
-    """
+def exact_match_lookup_all(highlighted_text: str, doc_prefix: Optional[str], near_idx: Optional[int]):
+    """Tìm TẤT CẢ trang chứa đoạn bôi đen (đã strip boilerplate), giới hạn đúng tài liệu đang xem."""
     norm_highlight = normalize_text(highlighted_text)
     if not norm_highlight:
-        return None, None
+        return []
 
     candidates = []
     for page_id, content in iter_db_for_doc(doc_prefix):
@@ -201,14 +196,18 @@ def exact_match_lookup(highlighted_text: str, doc_prefix: Optional[str], near_id
             candidates.append(page_id)
 
     if not candidates:
-        return None, None
+        return []
 
     if near_idx is not None:
         candidates.sort(key=lambda pid: abs((page_num_from_key(pid) or 0) - near_idx))
-    # else: giữ nguyên thứ tự tìm thấy (không có mỏ neo để ưu tiên)
 
-    best = candidates[0]
-    return best, slide_db.get(best)
+    return candidates
+
+def resolve_doc_id(page_id: str) -> Optional[str]:
+    for doc_id, prefix in KNOWN_DOCS.items():
+        if page_id.startswith(prefix):
+            return doc_id
+    return None
 
 
 def find_best_slide_for_free_chat(query: str, doc_prefix: Optional[str] = None) -> str:
@@ -246,7 +245,6 @@ def find_best_slide_for_free_chat(query: str, doc_prefix: Optional[str] = None) 
 # --- 4. API ENDPOINT ---
 @app.post("/chat")
 def chat(request: ChatRequest):
-    # LÀM SẠCH ĐẦU VÀO
     sec = sanitize_user_input(request.message)
     user_message = sec["clean"]
 
@@ -254,31 +252,24 @@ def chat(request: ChatRequest):
         return {"mode": "rejected", "answer": "Bạn vui lòng nhập câu hỏi nhé.", "citations": []}
 
     doc_prefix = resolve_doc_prefix(request.doc_id)
-
     if request.doc_id and doc_prefix is None:
-        # FE gửi 1 doc_id lạ, không có trong KNOWN_DOCS -> báo lỗi rõ ràng thay vì
-        # âm thầm coi như "không biết tài liệu nào" (dễ che giấu bug tích hợp).
         raise HTTPException(status_code=400, detail=f"Unknown doc_id: {request.doc_id}")
 
-    match = re.search(r'\((?:Trang|Page)\s*(\d+),\s*(?:đoạn được chọn|highlighted):\s*"(.*?)"\)', user_message, re.IGNORECASE)
+    # LỚP PHẠM VI CỨNG: phân loại IN/OUT trước khi làm bất cứ gì
+    if SCOPE_GUARD_ENABLED and classify_scope(user_message) == "OUT":
+        resp = _out_of_scope_response()
+        if sec.get("suspicious"):
+            resp["security_flag"] = True
+        return resp
 
-    if match:
-        # ==========================================
-        # NHÁNH A: ANCHORED (DETERMINISTIC LOOKUP)
-        # ==========================================
-        reported_page = match.group(1)
-        raw_highlighted_text = match.group(2)
-        real_question = user_message[match.end():].strip()
-
-        # Đoạn bôi đen sau khi loại watermark/footer -- dùng cho MỌI bước phía dưới
-        # (độ dài, so khớp Fast Path, so khớp Slow Path).
-        highlighted_text = strip_boilerplate(raw_highlighted_text)
-
-        try:
-            reported_idx = int(reported_page) - 1  # UI 1-index -> DB 0-index
-        except ValueError:
-            reported_idx = None
-
+    if request.highlighted_text:
+        # NHÁNH A: ANCHORED
+        highlighted_text = strip_boilerplate(request.highlighted_text)
+        
+        reported_idx = None
+        if request.highlighted_page is not None:
+            reported_idx = request.highlighted_page - 1
+            
         page_key = None
         slide_context = None
         if doc_prefix is not None and reported_idx is not None and reported_idx >= 0:
@@ -291,102 +282,87 @@ def chat(request: ChatRequest):
         unverified_highlight = False
         mode = None
 
-        # 1. FAST PATH: đúng file + đúng index + text thực sự nằm trong trang đó
         if slide_context and norm_highlight and norm_highlight in normalize_text(slide_context):
             final_context = slide_context
             final_page_id = page_key
             mode = "anchored_success"
-
-        # 2. SLOW PATH: chỉ chạy khi text đủ dài (đã trừ boilerplate) để tránh
-        #    false positive, và CHỈ scan trong đúng tài liệu đang xem.
         elif len(highlighted_text) >= MIN_LEN_FOR_SLOW_PATH:
-            true_page_id, true_context = exact_match_lookup(
-                highlighted_text, doc_prefix, near_idx=reported_idx
-            )
-            if true_context:
-                final_context = true_context
-                final_page_id = true_page_id
-                mode = "anchored_success_corrected"
-                print(f"[WARNING] Page Offset Detected! UI reported {reported_page} "
-                      f"but text found at {true_page_id} instead.")
+            candidates = exact_match_lookup_all(highlighted_text, doc_prefix, near_idx=reported_idx)
+            if candidates:
+                final_page_id = candidates[0]
+                final_context = slide_db.get(final_page_id)
+                if len(candidates) > 1 and reported_idx is None:
+                    mode = "anchored_ambiguous"
+                else:
+                    mode = "anchored_success_corrected"
             elif slide_context:
-                # Lớp 4: không verify được, nhưng page_X hợp lệ trong đúng tài liệu -> vẫn dùng
                 final_context = slide_context
                 final_page_id = page_key
                 unverified_highlight = True
                 mode = "anchored_unverified"
             else:
                 mode = "anchored_not_found"
-
-        # 3. Text quá ngắn để scan an toàn, nhưng page_X vẫn hợp lệ -> tin tưởng có kiểm soát
         elif slide_context:
             final_context = slide_context
             final_page_id = page_key
             unverified_highlight = True
             mode = "anchored_unverified"
-
         else:
             mode = "anchored_not_found"
 
-        # 4. Build prompt theo kết quả
         if final_context is not None:
-            confidence_note = (
-                ""
-                if not unverified_highlight
-                else "\n(Lưu ý: không xác minh được đoạn bôi đen khớp chính xác trong trang này, "
-                     "trả lời thận trọng và có thể nhắc học viên xác nhận lại nếu cần.)"
-            )
-            prompt = (
-                f"Ngữ cảnh Slide:\n{final_context}\n\n"
-                f"Đoạn học viên đang chú ý: \"{highlighted_text}\"\n"
-                f"Câu hỏi: {real_question}{confidence_note}\n"
-                f"Bắt buộc trích dẫn bằng thẻ <citation>{final_page_id}</citation> ở cuối câu trả lời."
+            prompt = build_anchored_success_prompt(
+                slide_context=final_context, 
+                page_id=final_page_id, 
+                question=user_message,
+                highlighted_text=highlighted_text,
+                unverified_highlight=unverified_highlight
             )
             enable_search = True
         else:
-            prompt = (
-                f"Học viên hỏi: {real_question}. Đoạn bôi đen không tìm thấy trong cơ sở dữ liệu "
-                f"(có thể do lỗi phiên bản tài liệu). Trả lời khéo léo yêu cầu làm rõ và tuyệt đối "
-                f"không tạo thẻ citation."
-            )
+            prompt = build_anchored_not_found_prompt(user_message)
             enable_search = False
 
         llm_response = generate_answer(prompt, enable_search=enable_search)
 
         response_dict = {
             "mode": mode,
-            "detected_page": reported_page,
+            "detected_page": str(request.highlighted_page) if request.highlighted_page else None,
             "doc_id": request.doc_id,
             "unverified_highlight": unverified_highlight,
         }
-        if DEBUG_EXPOSE_PROMPT:
-            response_dict["final_prompt_template"] = prompt
-
+        
         if isinstance(llm_response, dict):
             llm_response = sanitize_output(llm_response, slide_db.keys())
             protected = [final_context] if final_context else []
             llm_response = guard_protected_data(llm_response, protected)
+            
+            if llm_response.get("citations") and final_page_id:
+                page_num = page_num_from_key(final_page_id)
+                page_num = page_num + 1 if page_num is not None else None
+                doc_id = resolve_doc_id(final_page_id)
+                llm_response["citations"] = [{
+                    "doc_id": doc_id,
+                    "page": page_num,
+                    "raw_key": final_page_id
+                }]
+            else:
+                llm_response["citations"] = []
+                
             response_dict.update(llm_response)
         else:
             response_dict["llm_response"] = llm_response
             
         if sec.get("suspicious"):
             response_dict["security_flag"] = True
+            
+        if DEBUG_EXPOSE_PROMPT:
+            response_dict["final_prompt_template"] = prompt
 
         return response_dict
-
+        
     else:
-        # ==========================================
-        # NHÁNH B: UNANCHORED (QDRANT RAG)
-        # ==========================================
-        # LỚP PHẠM VI CỨNG: phân loại IN/OUT trước khi làm bất cứ gì.
-        # Câu lạc đề -> từ chối ngay, KHÔNG gọi LLM sinh, KHÔNG Google Search.
-        if SCOPE_GUARD_ENABLED and classify_scope(user_message) == "OUT":
-            resp = _out_of_scope_response()
-            if sec.get("suspicious"):
-                resp["security_flag"] = True
-            return resp
-
+        # NHÁNH B: UNANCHORED
         if qdrant is None or encoder is None:
             return {"mode": "unanchored", "error": "Qdrant not initialized"}
 
@@ -407,18 +383,7 @@ def chat(request: ChatRequest):
 
         best_slide_page = find_best_slide_for_free_chat(user_message, doc_prefix)
 
-        prompt = f"""Bạn là gia sư AI khóa học. Học viên hỏi: "{user_message}"
-
-[NGỮ CẢNH TỪ LỜI GIẢNG] (Dùng để lấy kiến thức trả lời):
-{combined_context}
-
-[THÔNG TIN TRÍCH DẪN]
-Slide liên quan nhất: Trang {best_slide_page}
-
-Nhiệm vụ:
-1. Trả lời câu hỏi trên dựa vào lời giảng.
-2. Nếu ngữ cảnh lời giảng không có thông tin, bạn PHẢI SỬ DỤNG CÔNG CỤ TÌM KIẾM GOOGLE (Google Search) để lấy thông tin mới nhất và trả lời.
-3. Nếu sử dụng thông tin từ lời giảng, BẮT BUỘC chèn trích dẫn bằng thẻ <citation>{best_slide_page}</citation> vào cuối câu trả lời. Nếu hoàn toàn dùng kiến thức độc lập (hoặc Google Search), TUYỆT ĐỐI KHÔNG tạo thẻ này."""
+        prompt = build_unanchored_rag_prompt(user_message, combined_context, best_slide_page)
 
         llm_response = generate_answer(prompt, enable_search=True)
 
@@ -427,9 +392,7 @@ Nhiệm vụ:
             "detected_page": best_slide_page,
             "doc_id": request.doc_id,
         }
-        if DEBUG_EXPOSE_PROMPT:
-            response_dict["final_prompt_template"] = prompt
-
+        
         if isinstance(llm_response, dict):
             llm_response = sanitize_output(llm_response, slide_db.keys())
             protected = list(retrieved_texts)
@@ -437,6 +400,19 @@ Nhiệm vụ:
             if mapped_slide:
                 protected.append(mapped_slide)
             llm_response = guard_protected_data(llm_response, protected)
+            
+            if llm_response.get("citations") and best_slide_page:
+                page_num = page_num_from_key(best_slide_page)
+                page_num = page_num + 1 if page_num is not None else None
+                doc_id = resolve_doc_id(best_slide_page)
+                llm_response["citations"] = [{
+                    "doc_id": doc_id,
+                    "page": page_num,
+                    "raw_key": best_slide_page
+                }]
+            else:
+                llm_response["citations"] = []
+                
             response_dict.update(llm_response)
         else:
             response_dict["llm_response"] = llm_response
@@ -444,8 +420,10 @@ Nhiệm vụ:
         if sec.get("suspicious"):
             response_dict["security_flag"] = True
 
-        return response_dict
+        if DEBUG_EXPOSE_PROMPT:
+            response_dict["final_prompt_template"] = prompt
 
+        return response_dict
 
 if __name__ == "__main__":
     import uvicorn

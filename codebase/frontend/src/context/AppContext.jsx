@@ -14,6 +14,11 @@ export const AppContextProvider = ({ children }) => {
         localStorage.getItem("theme") || "light"
     );
 
+    // --- Added for VLearn Dual-Engine Integration ---
+    const [currentDocId, setCurrentDocId] = useState("d1-slide-hackathon.pdf"); // Default hardcoded for now
+    const [highlightedText, setHighlightedText] = useState(null);
+    const [highlightedPage, setHighlightedPage] = useState(null);
+
     // Theme
     useEffect(() => {
 
@@ -57,6 +62,14 @@ export const AppContextProvider = ({ children }) => {
         updateChatMessages,
 
         axios,
+        
+        // --- Added for VLearn Dual-Engine Integration ---
+        currentDocId,
+        setCurrentDocId,
+        highlightedText,
+        setHighlightedText,
+        highlightedPage,
+        setHighlightedPage,
 
     };
 
