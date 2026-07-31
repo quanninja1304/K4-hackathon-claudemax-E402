@@ -2,11 +2,13 @@ from fastapi.testclient import TestClient
 from main import app
 import json
 import time
+import os
 
 client = TestClient(app)
 
 def test_chat():
-    out_file = open("D:/vinai/qn1304/codebase/backend/test_llm_out.txt", "w", encoding="utf-8")
+    out_file_path = os.path.join(os.path.dirname(__file__), "test_llm_out.txt")
+    out_file = open(out_file_path, "w", encoding="utf-8")
     
     def log(text):
         # Bỏ print(text) để terminal Windows không bị lỗi font chữ
@@ -17,19 +19,31 @@ def test_chat():
     # --- TEST NHÁNH A (BÔI ĐEN TỒN TẠI) ---
     log("\n[TEST 1] Anchored Flow (Found in DB)")
     req1 = {
-        "message": "(Trang 5, đoạn được chọn: \"Hệ chuyên gia (expert system)\")\nGiải thích cho mình phần này với?"
+        "message": "(Trang 5, đoạn được chọn: \"Hệ chuyên gia (expert system)\")\nGiải thích cho mình phần này với?",
+        "doc_id": "d1-slide-hackathon.pdf"
     }
     res1 = client.post("/chat", json=req1)
     log(f"Result:\n{json.dumps(res1.json(), indent=2, ensure_ascii=False)}")
     time.sleep(5)
 
     # --- TEST NHÁNH A (BÔI ĐEN BỊ CẮT TRONG HACKATHON) ---
-    log("\n[TEST 2] Anchored Flow (Truncated in Hackathon PDF)")
+    log("\n[TEST 2] Anchored Flow (Highlight mismatch but page exists - NEW ARCHITECTURE)")
     req2 = {
-        "message": "(Trang 45, đoạn được chọn: \"giải thích 4 chiến lược\")\nChiến lược 3 là gì?"
+        "message": "(Trang 45, đoạn được chọn: \"giải thích 4 chiến lược\")\nChiến lược 3 là gì?",
+        "doc_id": "d1-slide-hackathon.pdf"
     }
     res2 = client.post("/chat", json=req2)
     log(f"Result:\n{json.dumps(res2.json(), indent=2, ensure_ascii=False)}")
+    time.sleep(5)
+
+    # --- TEST NHÁNH A (TRANG KHÔNG TỒN TẠI) ---
+    log("\n[TEST 2.5] Anchored Flow (Page 99 doesn't exist)")
+    req2_5 = {
+        "message": "(Trang 99, đoạn được chọn: \"ảo tưởng\")\nTại sao lại thế?",
+        "doc_id": "d1-slide-hackathon.pdf"
+    }
+    res2_5 = client.post("/chat", json=req2_5)
+    log(f"Result:\n{json.dumps(res2_5.json(), indent=2, ensure_ascii=False)}")
     time.sleep(5)
 
     # --- TEST NHÁNH B (CHAT TỰ DO - DÙNG RAG VÀ SLIDE MAPPING) ---
@@ -44,7 +58,7 @@ def test_chat():
     for q in free_queries:
         safe_q = q.encode('ascii', 'ignore').decode('ascii')
         log(f"\n--- Query: '{safe_q}' ---")
-        req = {"message": q}
+        req = {"message": q, "doc_id": "d1-slide-hackathon.pdf"}
         res = client.post("/chat", json=req)
         
         rag_result = res.json()
