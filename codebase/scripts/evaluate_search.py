@@ -1,5 +1,9 @@
+import os
 import json
 import re
+
+CODEBASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def normalize_text(text):
     """Xóa bỏ mọi khoảng trắng thừa, dấu xuống dòng, in thường để so sánh."""
@@ -16,7 +20,7 @@ def exact_match_lookup(highlighted_text, slide_db):
     return None, None
 
 def evaluate():
-    with open("D:/vinai/qn1304/codebase/data/slide_db.json", "r", encoding="utf-8") as f:
+    with open(os.path.join(CODEBASE_DIR, "data", "slide_db.json"), "r", encoding="utf-8") as f:
         slide_db = json.load(f)
         
     test_cases = [
@@ -28,7 +32,7 @@ def evaluate():
         "Hành trình khóa học: LLM Foundation"
     ]
     
-    with open("D:/vinai/qn1304/codebase/scripts/evaluate_out.txt", "w", encoding="utf-8") as f:
+    with open(os.path.join(SCRIPTS_DIR, "evaluate_out.txt"), "w", encoding="utf-8") as f:
         f.write("--- EVALUATING MATCHING ALGORITHM ---\n")
         for text in test_cases:
             page_id, content = exact_match_lookup(text, slide_db)

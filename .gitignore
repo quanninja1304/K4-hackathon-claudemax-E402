@@ -5,3 +5,4 @@ __pycache__/
 codebase/data/qdrant_db/
 *.txt
 !requirements.txt
+!codebase/prompts/system_prompt.txt

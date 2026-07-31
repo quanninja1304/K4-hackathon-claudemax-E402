@@ -4,6 +4,9 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct
 from sentence_transformers import SentenceTransformer
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CODEBASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 def build_qdrant_db():
     load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
     qdrant_url = os.getenv("QDRANT_URL")
@@ -16,7 +19,7 @@ def build_qdrant_db():
     else:
         print("Initializing Qdrant In-Memory/Disk Client...")
         # Lưu database trực tiếp trên disk, không cần docker
-        qdrant_path = "D:/vinai/qn1304/codebase/data/qdrant_db"
+        qdrant_path = os.path.join(CODEBASE_DIR, "data", "qdrant_db")
         client = QdrantClient(path=qdrant_path)
     
     collection_name = "transcripts"
@@ -33,7 +36,7 @@ def build_qdrant_db():
     model = SentenceTransformer('all-MiniLM-L6-v2')
     
     # Đọc file transcript giả lập (lấy file 1 làm mẫu)
-    transcript_file = "D:/vinai/qn1304/data/vlearn-pack/transcript/transcript-01-clean.md"
+    transcript_file = os.path.join(REPO_ROOT, "data", "vlearn-pack", "transcript", "transcript-01-clean.md")
     
     if not os.path.exists(transcript_file):
         print(f"Error: Not found {transcript_file}")

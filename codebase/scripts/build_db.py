@@ -3,10 +3,13 @@ import json
 import os
 import re
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CODEBASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 def build_slide_db():
     pdf_files = [
-        "D:/vinai/qn1304/data/vlearn-pack/slides/d1-slide-hackathon.pdf",
-        "D:/vinai/qn1304/data/vlearn-pack/slides/d2-slide-hackathon.pdf"
+        os.path.join(REPO_ROOT, "data", "vlearn-pack", "slides", "d1-slide-hackathon.pdf"),
+        os.path.join(REPO_ROOT, "data", "vlearn-pack", "slides", "d2-slide-hackathon.pdf"),
     ]
     
     db = {}
@@ -41,7 +44,7 @@ def build_slide_db():
             print(f"  - Physical page {i+1} -> Real page (Footer): {real_page_number}")
             
     # Save to JSON
-    out_path = "D:/vinai/qn1304/codebase/data/slide_db.json"
+    out_path = os.path.join(CODEBASE_DIR, "data", "slide_db.json")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)

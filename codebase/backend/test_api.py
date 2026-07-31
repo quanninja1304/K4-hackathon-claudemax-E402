@@ -1,3 +1,4 @@
+import os
 from fastapi.testclient import TestClient
 from main import app
 import json
@@ -5,8 +6,10 @@ import time
 
 client = TestClient(app)
 
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+
 def test_chat():
-    out_file = open("D:/vinai/qn1304/codebase/backend/test_llm_out.txt", "w", encoding="utf-8")
+    out_file = open(os.path.join(BACKEND_DIR, "test_llm_out.txt"), "w", encoding="utf-8")
     
     def log(text):
         # Bỏ print(text) để terminal Windows không bị lỗi font chữ

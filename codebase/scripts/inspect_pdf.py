@@ -1,5 +1,10 @@
+import os
 import fitz
-doc = fitz.open("D:/vinai/qn1304/data/vlearn-pack/slides/d1-slide-hackathon.pdf")
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CODEBASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+doc = fitz.open(os.path.join(REPO_ROOT, "data", "vlearn-pack", "slides", "d1-slide-hackathon.pdf"))
 text = doc[5].get_text() # Try page index 5
-with open("D:/vinai/qn1304/codebase/data/page5_dump.txt", "w", encoding="utf-8") as f:
+with open(os.path.join(CODEBASE_DIR, "data", "page5_dump.txt"), "w", encoding="utf-8") as f:
     f.write(text)
