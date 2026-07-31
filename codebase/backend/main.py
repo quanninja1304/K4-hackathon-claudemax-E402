@@ -9,6 +9,7 @@ import unicodedata
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
@@ -21,6 +22,14 @@ from prompt_builder import (
 from security import sanitize_user_input, wrap_untrusted, sanitize_output, guard_protected_data
 
 app = FastAPI(title="VLearn Tutor API - Dual Engine")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Chỉ trả về prompt nội bộ (final_prompt_template) khi bật debug tường minh.
 # Mặc định TẮT để không rò rỉ system prompt cho người tấn công.

@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import Sidebar from "./components/Sidebar";
+import React from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import ChatBox from "./components/ChatBox";
 import Support from "./pages/support";
@@ -10,7 +9,6 @@ import "./assets/prism.css";
 import { Toaster } from "react-hot-toast";
 
 const App = () => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { pathname } = useLocation();
 
   if (pathname === "/loading") {
@@ -21,20 +19,8 @@ const App = () => {
     <>
       <Toaster />
 
-      {!isMenuOpen && (
-        <img
-          src={assets.menu_icon}
-          className="absolute top-3 left-3 w-8 h-8 cursor-pointer md:hidden z-10 invert dark:invert-0"
-          onClick={() => setIsMenuOpen(true)}
-        />
-      )}
-
       <div className="dark:bg-gradient-to-b from-[#242124] to-[#000000] dark:text-white">
         <div className="flex h-screen w-screen overflow-hidden">
-          <Sidebar
-            isMenuOpen={isMenuOpen}
-            setIsMenuOpen={setIsMenuOpen}
-          />
 
           <Routes>
             <Route path="/" element={<ChatBox />} />

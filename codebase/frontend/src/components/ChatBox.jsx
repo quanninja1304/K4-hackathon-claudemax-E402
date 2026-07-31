@@ -35,22 +35,6 @@ const ChatBox = () => {
 
       e.preventDefault();
 
-      if (!user) {
-
-        return toast.error(
-          'Please login to send a message'
-        );
-
-      }
-
-      if (!selectedChat) {
-
-        return toast.error(
-          'No chat selected'
-        );
-
-      }
-
       setLoading(true);
 
       const promptCopy = prompt;
@@ -68,10 +52,12 @@ const ChatBox = () => {
         userMessage
       ]);
 
-      updateChatMessages(
-        selectedChat._id,
-        userMessage
-      );
+      if (selectedChat) {
+        updateChatMessages(
+          selectedChat._id,
+          userMessage
+        );
+      }
 
       // Call new Backend `/chat` API
       const { data } = await axios.post(

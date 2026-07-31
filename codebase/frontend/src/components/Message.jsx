@@ -3,6 +3,7 @@ import { assets } from "../assets/assets";
 import moment from "moment";
 import Markdown from "react-markdown";
 import Prism from "prismjs";
+import toast from "react-hot-toast";
 
 const Message = ({ message }) => {
 
@@ -78,6 +79,18 @@ const Message = ({ message }) => {
                       return (
                         <button 
                           key={idx} 
+                          onClick={() => {
+                            if (isCurrentDoc) {
+                              const el = document.getElementById(`pdf-page-${c.page}`);
+                              if (el) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              } else {
+                                toast.error(`Trang ${c.page} chưa được load.`);
+                              }
+                            } else {
+                              toast.error(`Nội dung này nằm ở tài liệu khác: ${c.doc_id}`);
+                            }
+                          }}
                           className={`text-xs px-2 py-1 rounded-full border cursor-pointer hover:opacity-80 transition-opacity ${isCurrentDoc ? 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900 dark:text-blue-200 dark:border-blue-700' : 'bg-gray-200 text-gray-800 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600'}`}
                         >
                           {isCurrentDoc ? `Trang ${c.page}` : `[${c.doc_id}] Trang ${c.page}`}

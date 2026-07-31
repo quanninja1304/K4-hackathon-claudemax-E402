@@ -56,7 +56,7 @@ export const PdfViewer = () => {
                     error={<div className="text-red-500">Không thể tải tài liệu. Vui lòng đảm bảo file tồn tại ở public/{currentDocId}</div>}
                 >
                     {Array.from(new Array(numPages), (el, index) => (
-                        <div key={`page_${index + 1}`} className="shadow-lg rounded-md overflow-hidden bg-white">
+                        <div key={`page_${index + 1}`} id={`pdf-page-${index + 1}`} className="shadow-lg rounded-md overflow-hidden bg-white mb-4">
                             <Page 
                                 pageNumber={index + 1} 
                                 renderTextLayer={true} 
