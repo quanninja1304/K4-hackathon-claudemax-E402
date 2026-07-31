@@ -1,9 +1,12 @@
+import os
 import fitz
 import re
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 pdf_files = [
-    "D:/vinai/qn1304/data/vlearn-pack/slides/d1-slide-hackathon.pdf",
-    "D:/vinai/qn1304/data/vlearn-pack/slides/d2-slide-hackathon.pdf"
+    os.path.join(REPO_ROOT, "data", "vlearn-pack", "slides", "d1-slide-hackathon.pdf"),
+    os.path.join(REPO_ROOT, "data", "vlearn-pack", "slides", "d2-slide-hackathon.pdf"),
 ]
 
 for pdf in pdf_files:

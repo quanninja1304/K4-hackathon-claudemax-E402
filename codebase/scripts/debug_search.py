@@ -1,9 +1,13 @@
+import os
 import json
 
-with open("D:/vinai/qn1304/codebase/data/slide_db.json", "r", encoding="utf-8") as f:
+CODEBASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+with open(os.path.join(CODEBASE_DIR, "data", "slide_db.json"), "r", encoding="utf-8") as f:
     slide_db = json.load(f)
 
-with open("D:/vinai/qn1304/codebase/scripts/search_out.txt", "w", encoding="utf-8") as out:
+with open(os.path.join(SCRIPTS_DIR, "search_out.txt"), "w", encoding="utf-8") as out:
     out.write("--- SEARCH RESULTS ---\n")
     for page_id, content in slide_db.items():
         if "chiến lược" in content.lower():

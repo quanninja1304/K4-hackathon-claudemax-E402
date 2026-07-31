@@ -12,9 +12,43 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
-from llm_caller import generate_answer
+from llm_caller import generate_answer, classify_scope
+from prompt_builder import (
+    build_anchored_success_prompt,
+    build_anchored_not_found_prompt,
+    build_unanchored_rag_prompt,
+)
+from security import sanitize_user_input, wrap_untrusted, sanitize_output, guard_protected_data
 
 app = FastAPI(title="VLearn Tutor API - Dual Engine")
+
+# Chỉ trả về prompt nội bộ (final_prompt_template) khi bật debug tường minh.
+# Mặc định TẮT để không rò rỉ system prompt cho người tấn công.
+DEBUG_EXPOSE_PROMPT = os.getenv("DEBUG_EXPOSE_PROMPT", "0") == "1"
+
+# Bật/tắt lớp phân loại phạm vi bằng LLM (gate cứng cho câu lạc đề). Mặc định BẬT.
+SCOPE_GUARD_ENABLED = os.getenv("SCOPE_GUARD_ENABLED", "1") == "1"
+
+# Thông điệp từ chối cố định cho câu hỏi ngoài phạm vi (không gọi LLM sinh).
+OUT_OF_SCOPE_REPLY = (
+    "Mình là trợ giảng AI của khoá học, nên chỉ hỗ trợ các câu hỏi liên quan tới "
+    "nội dung slide và bài giảng (AI, LLM, cách xác định và thiết kế bài toán cho AI...). "
+    "Câu hỏi này nằm ngoài phạm vi đó nên mình xin phép không trả lời. "
+    "Bạn thử hỏi mình về nội dung khoá học nhé!"
+)
+
+def _out_of_scope_response(mode="out_of_scope"):
+    return {
+        "mode": mode,
+        "detected_page": None,
+        "answer": OUT_OF_SCOPE_REPLY,
+        "follow_up": [
+            "Bạn muốn mình giải thích khái niệm nào trong bài giảng?",
+            "Bạn đang xem slide ở trang nào và cần làm rõ phần gì?",
+        ],
+        "citations": [],
+        "external_links": [],
+    }
 
 # --- 1. STARTUP: LOAD DATABASES ---
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # Trỏ về thư mục codebase/
@@ -212,7 +246,13 @@ def find_best_slide_for_free_chat(query: str, doc_prefix: Optional[str] = None) 
 # --- 4. API ENDPOINT ---
 @app.post("/chat")
 def chat(request: ChatRequest):
-    user_message = request.message
+    # LÀM SẠCH ĐẦU VÀO
+    sec = sanitize_user_input(request.message)
+    user_message = sec["clean"]
+
+    if not user_message:
+        return {"mode": "rejected", "answer": "Bạn vui lòng nhập câu hỏi nhé.", "citations": []}
+
     doc_prefix = resolve_doc_prefix(request.doc_id)
 
     if request.doc_id and doc_prefix is None:
@@ -318,12 +358,20 @@ def chat(request: ChatRequest):
             "detected_page": reported_page,
             "doc_id": request.doc_id,
             "unverified_highlight": unverified_highlight,
-            "final_prompt_template": prompt,
         }
+        if DEBUG_EXPOSE_PROMPT:
+            response_dict["final_prompt_template"] = prompt
+
         if isinstance(llm_response, dict):
+            llm_response = sanitize_output(llm_response, slide_db.keys())
+            protected = [final_context] if final_context else []
+            llm_response = guard_protected_data(llm_response, protected)
             response_dict.update(llm_response)
         else:
             response_dict["llm_response"] = llm_response
+            
+        if sec.get("suspicious"):
+            response_dict["security_flag"] = True
 
         return response_dict
 
@@ -331,6 +379,14 @@ def chat(request: ChatRequest):
         # ==========================================
         # NHÁNH B: UNANCHORED (QDRANT RAG)
         # ==========================================
+        # LỚP PHẠM VI CỨNG: phân loại IN/OUT trước khi làm bất cứ gì.
+        # Câu lạc đề -> từ chối ngay, KHÔNG gọi LLM sinh, KHÔNG Google Search.
+        if SCOPE_GUARD_ENABLED and classify_scope(user_message) == "OUT":
+            resp = _out_of_scope_response()
+            if sec.get("suspicious"):
+                resp["security_flag"] = True
+            return resp
+
         if qdrant is None or encoder is None:
             return {"mode": "unanchored", "error": "Qdrant not initialized"}
 
@@ -370,12 +426,23 @@ Nhiệm vụ:
             "mode": "unanchored_rag",
             "detected_page": best_slide_page,
             "doc_id": request.doc_id,
-            "final_prompt_template": prompt,
         }
+        if DEBUG_EXPOSE_PROMPT:
+            response_dict["final_prompt_template"] = prompt
+
         if isinstance(llm_response, dict):
+            llm_response = sanitize_output(llm_response, slide_db.keys())
+            protected = list(retrieved_texts)
+            mapped_slide = slide_db.get(best_slide_page)
+            if mapped_slide:
+                protected.append(mapped_slide)
+            llm_response = guard_protected_data(llm_response, protected)
             response_dict.update(llm_response)
         else:
             response_dict["llm_response"] = llm_response
+            
+        if sec.get("suspicious"):
+            response_dict["security_flag"] = True
 
         return response_dict
 

@@ -1,5 +1,9 @@
+import os
 import fitz
-doc = fitz.open("D:/vinai/qn1304/data/vlearn-pack/slides/d1-slide-hackathon.pdf")
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+doc = fitz.open(os.path.join(REPO_ROOT, "data", "vlearn-pack", "slides", "d1-slide-hackathon.pdf"))
 for i, page in enumerate(doc):
     text = page.get_text().strip()
     if text:
