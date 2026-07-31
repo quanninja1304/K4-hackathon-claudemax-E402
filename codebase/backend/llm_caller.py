@@ -245,7 +245,7 @@ def generate_answer(user_prompt: str, enable_search: bool = False) -> dict:
         if enable_search and response.candidates and response.candidates[0].grounding_metadata:
             metadata = response.candidates[0].grounding_metadata
             try:
-                chunks = getattr(metadata, 'grounding_chunks', [])
+                chunks = getattr(metadata, 'grounding_chunks', []) or []
                 chunk_data = []
                 for chunk in chunks:
                     web = getattr(chunk, 'web', None)
