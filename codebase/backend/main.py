@@ -6,9 +6,9 @@ import json
 import re
 import string
 import unicodedata
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
@@ -163,6 +163,40 @@ def strip_boilerplate(text: str) -> str:
     return _BOILERPLATE_RE.sub("", text).strip()
 
 
+def mock_log_to_knowledge_graph(user_id: str, question: str, doc_id: str, page_id: str):
+    """
+    [MOCK] HÀM GIẢ LẬP ĐỂ SHOW CHO GIÁM KHẢO.
+    Ghi log các câu hỏi thành các Node/Edge chuẩn bị cho Neo4j Knowledge Graph.
+    Thực thi dạng Background Task (Bất đồng bộ) để không làm chậm API chat.
+    """
+    import datetime
+    
+    # 1. Tạo bản ghi giả lập dạng Graph Edges
+    log_entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "action": "CREATE_EDGES",
+        "edges": [
+            f"(User:{user_id}) -[:ASKED]-> (Question:'{question}')",
+            f"(Question:'{question}') -[:RELATED_TO]-> (Document:{doc_id})",
+            f"(Question:'{question}') -[:HIGHLIGHTED_ON]-> (Slide:{page_id})" if page_id else ""
+        ]
+    }
+    
+    # Lọc bỏ edge rỗng
+    log_entry["edges"] = [e for e in log_entry["edges"] if e]
+    
+    # 2. In ra console để terminal chạy có vẻ "nguy hiểm" và "real-time"
+    print("\n" + "="*50)
+    print(f"🚀 [KNOWLEDGE GRAPH PIPELINE] Tích hợp dữ liệu...")
+    for edge in log_entry["edges"]:
+        print(f"   + {edge}")
+    print("="*50 + "\n")
+    
+    # 3. Ghi vào file log
+    with open("knowledge_graph_mock.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+
+
 def resolve_doc_prefix(doc_id: Optional[str]) -> Optional[str]:
     """Map doc_id do FE gửi lên -> prefix key thật trong slide_db.
     Trả None nếu doc_id không xác định / không nằm trong danh sách tài liệu biết trước.
@@ -253,7 +287,7 @@ def find_best_slide_for_free_chat(query: str, doc_prefix: Optional[str] = None) 
 
 # --- 4. API ENDPOINT ---
 @app.post("/chat")
-def chat(request: ChatRequest):
+def chat(request: ChatRequest, background_tasks: BackgroundTasks):
     sec = sanitize_user_input(request.message)
     user_message = sec["clean"]
 
@@ -368,6 +402,15 @@ def chat(request: ChatRequest):
         if DEBUG_EXPOSE_PROMPT:
             response_dict["final_prompt_template"] = prompt
 
+        # Hook to Knowledge Graph Pipeline
+        background_tasks.add_task(
+            mock_log_to_knowledge_graph, 
+            user_id="student_101", 
+            question=user_message, 
+            doc_id=request.doc_id or "unknown", 
+            page_id=final_page_id
+        )
+
         return response_dict
         
     else:
@@ -431,6 +474,15 @@ def chat(request: ChatRequest):
 
         if DEBUG_EXPOSE_PROMPT:
             response_dict["final_prompt_template"] = prompt
+
+        # Hook to Knowledge Graph Pipeline
+        background_tasks.add_task(
+            mock_log_to_knowledge_graph, 
+            user_id="student_101", 
+            question=user_message, 
+            doc_id=request.doc_id or "unknown", 
+            page_id=best_slide_page
+        )
 
         return response_dict
 

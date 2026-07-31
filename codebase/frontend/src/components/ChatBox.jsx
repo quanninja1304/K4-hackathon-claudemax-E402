@@ -29,21 +29,15 @@ const ChatBox = () => {
 
   const [prompt, setPrompt] = useState('');
 
-  const onSubmit = async (e) => {
+  const handleSend = async (textToSend) => {
 
     try {
 
-      e.preventDefault();
-
       setLoading(true);
-
-      const promptCopy = prompt;
-
-      setPrompt('');
 
       const userMessage = {
         role: 'user',
-        content: promptCopy,
+        content: textToSend,
         timestamp: Date.now()
       };
 
@@ -63,7 +57,7 @@ const ChatBox = () => {
       const { data } = await axios.post(
         'http://127.0.0.1:8000/chat',
         {
-          message: promptCopy,
+          message: textToSend,
           doc_id: currentDocId,
           highlighted_text: highlightedText || null,
           highlighted_page: highlightedPage || null
@@ -80,12 +74,14 @@ const ChatBox = () => {
         // Wrap response into a Message-compatible object
         const botMessage = {
           role: 'model',
-          content: data.answer || data.llm_response?.answer || '',
+          content: data.error || data.answer || data.llm_response?.answer || '',
           timestamp: Date.now(),
           mode: data.mode,
           citations: data.citations || [],
           security_flag: data.security_flag,
-          unverified_highlight: data.unverified_highlight
+          unverified_highlight: data.unverified_highlight,
+          follow_up: data.follow_up || [],
+          external_links: data.external_links || []
         };
 
         setMessages(prev => [
@@ -119,6 +115,14 @@ const ChatBox = () => {
 
     }
 
+  };
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    if (!prompt.trim()) return;
+    const textToSend = prompt;
+    setPrompt('');
+    await handleSend(textToSend);
   };
 
   useEffect(() => {
@@ -186,7 +190,7 @@ const ChatBox = () => {
         )}
 
         {messages.map((message, index) => (
-          <Message key={index} message={message} />
+          <Message key={index} message={message} onFollowUpClick={handleSend} />
         ))}
 
         {/* Loading */}

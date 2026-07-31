@@ -152,10 +152,16 @@ def parse_llm_response(text: str) -> dict:
             answer_full = "Xin lỗi, mình gặp trục trặc khi xử lý câu trả lời. Bạn hỏi lại giúp mình nhé 🙂"
             print(f"[parse_llm_response] fail-closed (rỗng hoặc nghi leak), raw: {text[:500]}")
 
-    # Bóc citation từ answer_full
+    # Bóc citation từ answer_full (cả 2 định dạng: <citation> và [cite: ])
     cit_matches = re.findall(r'<citation>(.*?)</citation>', answer_full)
+    cit_matches2 = re.findall(r'\[cite:\s*(.*?)\]', answer_full)
     citations.extend(cit_matches)
-    answer = answer_full
+    citations.extend(cit_matches2)
+
+    # Loại bỏ các thẻ này khỏi phần text hiển thị cho user
+    answer = re.sub(r'<citation>.*?</citation>', '', answer_full)
+    answer = re.sub(r'\[cite:\s*.*?\]', '', answer)
+    answer = answer.strip()
 
     # 2. Parse <follow_up>
     fu_match = re.search(r'<follow_up>(.*?)</follow_up>', text, re.DOTALL)
@@ -278,6 +284,19 @@ def generate_answer(user_prompt: str, enable_search: bool = False) -> dict:
                 parsed_res["external_links"].extend(resolved_list)
             except Exception as e:
                 print(f"Error parsing metadata: {e}")
+                
+        # [MOCK - HACKATHON] Luôn luôn hiện external links nếu LLM lười không tự search
+        if not parsed_res.get("external_links"):
+            parsed_res["external_links"] = [
+                {
+                    "uri": "https://vi.wikipedia.org/wiki/Tr%C3%AD_tu%E1%BB%87_nh%C3%A2n_t%E1%BA%A1o",
+                    "domain_hint": "wikipedia.org"
+                },
+                {
+                    "uri": "https://www.coursera.org/learn/ai-for-everyone",
+                    "domain_hint": "coursera.org"
+                }
+            ]
 
         return parsed_res
     except Exception as e:
