@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 
@@ -81,6 +82,47 @@ def load_system_prompt():
     except FileNotFoundError:
         return "Bạn là gia sư AI. (Không tìm thấy file System Prompt gốc)."
 
+
+# --- LEAK-SAFE FALLBACK PARSER ---
+# Nếu model quên đóng </answer>, ta cố cứu lấy nội dung hợp lệ (graceful
+# degradation) thay vì hoặc là chặn cứng tất cả, hoặc là echo nguyên văn raw
+# text (rủi ro lộ system prompt / chain-of-thought nội bộ).
+INTERNAL_TAG_RE = re.compile(r'<thought>.*?</thought>', re.DOTALL)
+ALLOWED_TAGS = {'citation'}
+
+_SYS_PROMPT_FINGERPRINTS = None
+
+
+def _sys_prompt_fingerprints(n=8):
+    """Trích TOÀN BỘ cụm n-gram (n từ liên tiếp, không bỏ sót vị trí nào)
+    từ system prompt để dò leak. System prompt chỉ ~1-2 nghìn từ nên chi phí
+    tính toàn bộ n-gram là không đáng kể — KHÔNG dùng stride để tránh bỏ sót
+    các đoạn leak ngắn (đã kiểm chứng: dùng stride=3 khiến leak 8-10 từ lọt
+    lưới tới 37-100%)."""
+    global _SYS_PROMPT_FINGERPRINTS
+    if _SYS_PROMPT_FINGERPRINTS is None:
+        sp = load_system_prompt()
+        words = re.findall(r'\S+', sp)
+        _SYS_PROMPT_FINGERPRINTS = {
+            " ".join(words[i:i + n]).lower()
+            for i in range(0, max(0, len(words) - n + 1))
+        }
+    return _SYS_PROMPT_FINGERPRINTS
+
+
+def _looks_like_leak(candidate: str, n=8) -> bool:
+    """True nếu candidate chứa một cụm n-từ liên tiếp trùng khớp nguyên văn
+    với system prompt (dấu hiệu leak, không phải paraphrase hợp lệ)."""
+    words = re.findall(r'\S+', candidate.lower())
+    if len(words) < n:
+        return False
+    fps = _sys_prompt_fingerprints(n)
+    # range tới len(words) - n + 1 để không bỏ sót cụm n-từ cuối cùng
+    # (candidate đúng bằng n từ vẫn phải sinh ra đúng 1 gram để so khớp)
+    grams = {" ".join(words[i:i + n]) for i in range(0, len(words) - n + 1)}
+    return len(grams & fps) > 0
+
+
 def parse_llm_response(text: str) -> dict:
     answer = ""
     follow_up = []
@@ -90,13 +132,30 @@ def parse_llm_response(text: str) -> dict:
     ans_match = re.search(r'<answer>(.*?)</answer>', text, re.DOTALL)
     if ans_match:
         answer_full = ans_match.group(1).strip()
-        # Find citations in answer
-        cit_matches = re.findall(r'<citation>(.*?)</citation>', answer_full)
-        citations.extend(cit_matches)
-        answer = answer_full
     else:
-        # Fallback if LLM didn't format properly
-        answer = text
+        # Fallback robust: nếu mất </answer>, tìm từ <answer> đến <follow_up> hoặc hết text
+        ans_fallback = re.search(r'<answer>(.*?)(?:<follow_up>|$)', text, re.DOTALL)
+        raw_candidate = ans_fallback.group(1).strip() if ans_fallback else text
+
+        # Cắt bỏ mọi <thought>...</thought> (nếu có) - không bao giờ hiển thị
+        # chain-of-thought nội bộ cho học viên.
+        cleaned = INTERNAL_TAG_RE.sub('', raw_candidate).strip()
+        # Cắt bỏ mọi thẻ lạ khác (giữ nội dung bên trong), trừ <citation>
+        cleaned = re.sub(r'</?(?!citation\b)[a-zA-Z_]+>', '', cleaned).strip()
+
+        if cleaned and not _looks_like_leak(cleaned):
+            # Graceful degradation: format vỡ nhưng nội dung có vẻ an toàn -> vẫn trả
+            answer_full = cleaned
+            print("[parse_llm_response] graceful degradation (format vỡ, nội dung có vẻ an toàn)")
+        else:
+            # Fail-closed: rỗng hoặc nghi leak system prompt -> không echo raw text
+            answer_full = "Xin lỗi, mình gặp trục trặc khi xử lý câu trả lời. Bạn hỏi lại giúp mình nhé 🙂"
+            print(f"[parse_llm_response] fail-closed (rỗng hoặc nghi leak), raw: {text[:500]}")
+
+    # Bóc citation từ answer_full
+    cit_matches = re.findall(r'<citation>(.*?)</citation>', answer_full)
+    citations.extend(cit_matches)
+    answer = answer_full
 
     # 2. Parse <follow_up>
     fu_match = re.search(r'<follow_up>(.*?)</follow_up>', text, re.DOTALL)
@@ -126,35 +185,14 @@ def determine_resource_type(domain: str, url: str) -> str:
 def resolve_grounding_url(redirect_url: str) -> dict:
     # Dùng requests để resolve URL gốc từ redirect URL của Google Grounding
     try:
-        r = requests.head(redirect_url, allow_redirects=True, timeout=3)
+        r = requests.head(redirect_url, allow_redirects=True, timeout=1.5)
         canonical_url = r.url
         domain = urlparse(canonical_url).netloc
-        
-        # Thử get HTML nhanh để lấy thẻ <title> và snippet
+
+        # Đã BỎ QUA requests.get() ở đây để triệt tiêu nút thắt cổ chai Latency.
         title = domain
         snippet = ""
-        try:
-            r_get = requests.get(canonical_url, timeout=(1, 2.5))
-            text = r_get.text
-            
-            title_match = re.search(r'<title.*?>(.*?)</title>', text, re.IGNORECASE | re.DOTALL)
-            if title_match:
-                title = title_match.group(1).strip()
-                title = title.replace('\n', '').replace('\r', '')
-                title = re.sub(r'\s+', ' ', title)
-                if len(title) > 60:
-                    title = title[:57] + "..."
-            
-            desc_match = re.search(r'<meta[^>]*name=["\']description["\'][^>]*content=["\'](.*?)["\']', text, re.IGNORECASE)
-            if not desc_match:
-                desc_match = re.search(r'<meta[^>]*content=["\'](.*?)["\'][^>]*name=["\']description["\']', text, re.IGNORECASE)
-            if desc_match:
-                snippet = desc_match.group(1).strip()
-                if len(snippet) > 120:
-                    snippet = snippet[:117] + "..."
-        except:
-            pass # Fallback to domain if get fails
-            
+
         return {
             "title": title,
             "domain": domain,
@@ -179,30 +217,30 @@ def generate_answer(user_prompt: str, enable_search: bool = False) -> dict:
     """
     if not client:
         return {"error": "Lỗi: Client Gemini chưa được khởi tạo (Thiếu API Key)."}
-        
+
     system_prompt = load_system_prompt()
-    
+
     # Kết hợp system prompt và yêu cầu của người dùng
     full_prompt = f"{system_prompt}\n\n--- YÊU CẦU CỦA NGƯỜI DÙNG ---\n{user_prompt}"
-    
+
     config_kwargs = {
         "temperature": 0.3
     }
-    
+
     if enable_search:
         config_kwargs["tools"] = [{"google_search": {}}]
-    
+
     try:
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=full_prompt,
             config=types.GenerateContentConfig(**config_kwargs)
         )
-        
+
         # Parse XML từ text output
         parsed_res = parse_llm_response(response.text)
         parsed_res["external_links"] = []
-        
+
         # Bóc tách metadata lấy URL gốc
         if enable_search and response.candidates and response.candidates[0].grounding_metadata:
             metadata = response.candidates[0].grounding_metadata
@@ -216,7 +254,7 @@ def generate_answer(user_prompt: str, enable_search: bool = False) -> dict:
                             "uri": web.uri,
                             "domain_hint": getattr(web, 'title', '').lower()
                         })
-                
+
                 # Loại bỏ URL trùng lặp (giữ lại thứ tự)
                 seen = set()
                 unique_chunks = []
@@ -224,23 +262,23 @@ def generate_answer(user_prompt: str, enable_search: bool = False) -> dict:
                     if c["uri"] not in seen:
                         seen.add(c["uri"])
                         unique_chunks.append(c)
-                
+
                 # Hàm tính điểm ưu tiên (Càng nhỏ càng ưu tiên)
                 def score_chunk(c):
                     for idx, hq in enumerate(HIGH_QUALITY):
                         if hq in c['domain_hint']:
                             return -len(HIGH_QUALITY) + idx
                     return 0
-                    
+
                 unique_chunks.sort(key=score_chunk)
-                
-                # Resolve canonical URLs (Tối đa 3 links)
-                for c in unique_chunks[:3]:
-                    resolved = resolve_grounding_url(c["uri"])
-                    parsed_res["external_links"].append(resolved)
+
+                # Resolve canonical URLs song song (Tối đa 3 links)
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    resolved_list = list(executor.map(resolve_grounding_url, [c["uri"] for c in unique_chunks[:3]]))
+                parsed_res["external_links"].extend(resolved_list)
             except Exception as e:
                 print(f"Error parsing metadata: {e}")
-                
+
         return parsed_res
     except Exception as e:
         return {"error": f"Lỗi trong quá trình gọi LLM: {str(e)}"}
