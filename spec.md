@@ -33,11 +33,13 @@ Loại: [x] Tối ưu tính năng có sẵn  [ ] Tính năng mới
   | Hiển thị nguồn rõ ràng | Các câu trả lời của LLM luôn có thẻ trích dẫn (ví dụ: Trang slide 8) và External links. |
   | Gợi mở tư duy | Cung cấp 2-3 câu `follow_up` (chips) để dẫn dắt học viên hỏi tiếp. |
 
-## §5. Kiểu lỗi — Kịch bản rủi ro
-1. Học viên hỏi câu ngoài phạm vi -> Phân loại `SCOPE CLASSIFIER` bắt lỗi và từ chối.
-2. AI tự bịa kiến thức -> Ép prompt BẮT BUỘC dùng `<citation>` và RAG context.
-3. Không tìm thấy thông tin trong Slide -> Tự động kích hoạt Google Search Grounding để bổ sung.
-4. Lỗi API (Rate Limit 429) -> UI hiển thị thông báo lỗi rõ ràng thay vì bong bóng chat trống.
+## §5. Kiểu lỗi — Kịch bản rủi ro (4 lớp)
+| Lớp chỗ khó | Kịch bản rủi ro | Cách xử lý (Mitigation) |
+|---|---|---|
+| Đòi ngoài phạm vi | Học viên hỏi câu nấu ăn, thời tiết, giải trí. | Phân loại bằng `SCOPE CLASSIFIER`, bắt lỗi và từ chối lịch sự. |
+| AI Hallucination | AI tự bịa kiến thức không có trong bài giảng. | Ép prompt BẮT BUỘC dùng `<citation>` và RAG context, Grounding. |
+| Thiếu dữ liệu | Không tìm thấy thông tin trong Slide. | Tự động kích hoạt Google Search Grounding để bổ sung link ngoài. |
+| Lỗi hệ thống | Lỗi gọi API (Rate Limit 429), quá tải. | Cảnh báo lỗi 429 thân thiện trên giao diện thay vì im lặng. |
 
 ## §6. Bốn đường đi của trải nghiệm
 - **Happy path:** Hỏi đúng bài -> AI trả lời bằng Slide + Trích dẫn + External Links + Câu hỏi gợi mở.
@@ -51,10 +53,10 @@ Loại: [x] Tối ưu tính năng có sẵn  [ ] Tính năng mới
 - **Quality bar:** Đạt khi ≥ 90% qua bộ, và không có case jailbreak nào thành công.
 
 ## §8. Phân công & kế hoạch
-- **Nguyễn Văn A (Nhóm trưởng):** Code Backend (RAG, Gemini API), thiết kế kiến trúc Knowledge Graph.
-- **Trần Thị B:** Code Frontend (React, giao diện chat, thẻ hover links).
-- **Lê Văn C:** Viết Spec, Prompt Engineering (System Prompt, Scope Classifier).
-- **Phạm Thị D:** Gom dữ liệu, làm Golden Set (Evidence), chuẩn bị Demo Slides.
+- **Nguyễn Đại Quân (2A202601933):** Code Backend (RAG, Gemini API, FastAPI), thiết kế kiến trúc Knowledge Graph.
+- **Trần Kiên (2A202601598):** Code Frontend (React, giao diện chat, thẻ hover links).
+- **Nguyễn Phú Quang (2A202602017):** Viết Spec, Prompt Engineering (System Prompt, Scope Classifier).
+- **Trần Tuấn Linh (2A2026001612):** Gom dữ liệu, làm Golden Set (Evidence), Validation, chuẩn bị Demo Slides.
 - **Willing users (vòng validation):** Bạn X, Bạn Y, Bạn Z.
 - **Kế hoạch validation:** Hỏi 3 câu (Tính năng này có giúp bạn hiểu bài hơn không? Thẻ trích dẫn có dễ nhìn không? Nút bấm gợi ý có tiện không?)
 
