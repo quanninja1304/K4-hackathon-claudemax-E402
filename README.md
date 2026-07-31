@@ -1,7 +1,7 @@
 <div align="center">
   <h1>🎓 VLearn AI Tutor</h1>
   <p><em>Người Trợ giảng AI Thông minh - Khai phóng Sức mạnh Tự học của Học viên</em></p>
-  <p><b>Mini Hackathon AI — Batch 03 | Zone 1 | Nhóm 01</b></p>
+  <p><b>Cohort 4 - claudeMAX</b></p>
 </div>
 
 ---
@@ -9,6 +9,8 @@
 ## 🌟 Giới thiệu Dự án
 
 Khi học sinh học qua video bài giảng và slide, một trong những nỗi đau (Pain Point) lớn nhất là việc **bị đứt mạch học** khi gặp những thuật ngữ khó hiểu. Việc phải dừng video, mở tab mới, lên Google tìm kiếm không chỉ gây mất tập trung mà còn khiến học sinh tiếp thu những luồng kiến thức không đồng nhất với triết lý của khóa học.
+
+![Pain Point Analysis](notebooks/figs/output.png)
 
 **VLearn AI Tutor** ra đời để giải quyết vấn đề đó. Đây là một chatbot AI được nhúng trực tiếp vào trải nghiệm học tập, có khả năng "đọc" được đúng trang slide mà học sinh đang xem để giải đáp thắc mắc ngay lập tức, chính xác, và bám sát nội dung khóa học.
 
